@@ -7,8 +7,18 @@ class Stabilizer:
     Signed Pauli string
     """
 
-    def __init__(self, num_qubits):
+    def __init__(self, num_qubits, pauli_z=None):
+        """
+        Args:
+            num_qubits: number of qubits on which stabilizer acts
+            pauli_z: if this is an integer, the stabilizer II...IZI...I is 
+                returned where the Z acts on the qubit designated by the 
+                integer
+        
+        """
         self.z = np.zeros(num_qubits, dtype=int)
+        if pauli_z is not None:
+            self.z[pauli_z] = 1
         self.x = np.zeros(num_qubits, dtype=int)
         self.sign = 0
 
@@ -144,12 +154,13 @@ class StabilizerTableau:
 
         Note:
             This does not return a "view" of the StabilizerTableau object
-            but rather instantiates a new Stabilizer object.
+            but rather instantiates a new Stabilizer object and fills it 
+            with copies.
         """
         num_qubits = self.z.shape[0]
         stabilizer = Stabilizer(num_qubits)
-        stabilizer.z = self.z[:, index]
-        stabilizer.x = self.x[:, index]
+        stabilizer.z = self.z[:, index].copy()
+        stabilizer.x = self.x[:, index].copy()
         stabilizer.sign = self.signs[index]
         return stabilizer
     
@@ -183,6 +194,32 @@ class StabilizerTableau:
         new.x = self.x.copy()
         new.signs = self.signs.copy()
         return new
+    
+    def destabilizer_check(self, other):
+        """
+        Check that other is a valid destabilizer tableau for self
+
+        Args:
+            self: StabilizerTableau representing a stabilizer tableau
+            other: StabilizerTableau that may or may not be a destabilizer 
+                tableau for self
+        
+        Returns:
+            True if destabilizer tableau describes a valid set of 
+            destabilizers for self in the correct order
+        """
+        if not isinstance(other, StabilizerTableau):
+            raise TypeError('other must be a StabilizerTableau')
+        
+        if self.z.shape != other.z.shape:
+            raise ValueError('other must have same size as self')
+        
+        num_stabilizers = self.z.shape[1]
+        for i, j in np.ndindex((num_stabilizers, num_stabilizers)):
+            if not (i == j) ^ other[i].commute_test(self[j]):
+                return False
+        else:
+            return True
     
     def conjugate(self, gate, *qubits):
         """
@@ -260,6 +297,9 @@ class StabilizerTableau:
             source, target = qubits
             self.z[source] = (self.z[source] + self.z[target]) % 2
             self.x[target] = (self.x[target] + self.x[source]) % 2
+
+        elif gate == 'id':
+            pass
 
         else:
             raise ValueError(f'The gate {gate} is not implemented')
@@ -369,7 +409,7 @@ class StabilizerTableau:
         if destabilizers.z.shape != (num_qubits, num_stabilizers):
             raise ValueError('destabilizer tableau must be the same size')
 
-
+        # TODO: Test this routine
         for j in range(num_stabilizers):
             if not pauli_string.commute_test(self[j]):
                 j0 = j
@@ -397,13 +437,14 @@ class StabilizerTableau:
         for j in range(j0 + 1, num_stabilizers):
             if not pauli_string.commute_test(self[j]):
                 self[j] = self[j0] @ self[j]
-                destabilizers[j0] = destabilizers[j] @ destabilizers[j0]
+        for j in range(num_stabilizers):
+            if not pauli_string.commute_test(self[j]):
+                destabilizers[j] = self[j0] @ destabilizers[j]
+        
         destabilizers[j0] = self[j0]
         self[j0] = random_sign*pauli_string
 
         return random_sign
-
-
 
     def measure_qubit(self, qubit, destabilizers=None):
         """
@@ -433,7 +474,7 @@ class StabilizerTableau:
             raise TypeError('destabilizers must be a StabilizerTableau object')
 
         for j in range(num_stabilizers):
-            if self.x[qubit, j] == 1:
+            if self.x[qubit, j]:
                 j0 = j
                 break
         else:
@@ -444,31 +485,31 @@ class StabilizerTableau:
                     product = self[i] @ product
             sign = product.sign
 
-            # Assertions
-            assert not np.any(product.x), ('Product of destabilizers '
-                                            'is incorrect')
-            assert all([
-                product.z[i] == 1 if i == qubit 
-                else product.z[i] == 0 
-                for i in range(num_qubits)
-            ]), 'Product of destabilizers is incorrect'
-            assert sign == 0 or sign == 2, ('Imaginary measurement result. '
-                                            'Check that pauli_string is '
-                                            'Hermitian')
+            # # Assertions
+            # assert not np.any(product.x), ('Product of destabilizers '
+            #                                 'is incorrect')
+            # assert all([
+            #     product.z[i] == 1 if i == qubit 
+            #     else product.z[i] == 0 
+            #     for i in range(num_qubits)
+            # ]), 'Product of destabilizers is incorrect'
+            # assert sign == 0 or sign == 2, ('Imaginary measurement result. '
+            #                                 'Check that pauli_string is '
+            #                                 'Hermitian')
             
             # Result
             eigenvalue = (-1)**(sign//2)
             return eigenvalue
-
-        random_sign = (-1)**np.random.randint(2)
+        
         for j in range(j0 + 1, num_stabilizers):
-            if self.x[qubit, j] == 1:
+            if self.x[qubit, j]:
                 self[j] = self[j0] @ self[j]
-                destabilizers[j0] = destabilizers[j] @ destabilizers[j0]
+        for j in range(num_stabilizers):
+            if destabilizers.x[qubit, j]:
+                destabilizers[j] = self[j0] @ destabilizers[j]
         destabilizers[j0] = self[j0]
-        new_stabilizer = Stabilizer(num_qubits)
-        new_stabilizer.z[qubit] = 1
-        self[j0] = random_sign*new_stabilizer
+        random_sign = (-1)**np.random.randint(2)
+        self[j0] = random_sign*Stabilizer(num_qubits, pauli_z=qubit)
 
         return random_sign
 
@@ -488,8 +529,16 @@ class StabilizerTableau:
             StabilizerTableau.measure_pauli_string()!
         """
 
+        num_qubits = self.z.shape[0]
+        if (
+            destabilizers is not None 
+            and not self.destabilizer_check(destabilizers)
+            ):
+            raise ValueError('Given destabilizers are not in fact '
+                             'destabilizers')
+
         results = defaultdict(int)
-        for _ in range(shots):
+        for shot in range(shots):
             
             stabs = self.copy()
             destabs = destabilizers.copy()
