@@ -557,3 +557,80 @@ class StabilizerTableau:
             results[result] += 1
 
         return results
+
+def count_ones(stabilizers, destabilizers, shots=1024, exact=False):
+    """
+    Return distribution over the number of 1s in the final state
+
+    Args:
+        stabilizers: StabilizerTableau representing stabilizers
+        destabilizers: StabilizerTableau representing destabilizers
+        shots: if exact is False, sample this many times to return an 
+            approximate distribution
+        exact: if True all possible measurement outcomes are explored with 
+            appropriate weight. Setting to True may take longer.
+
+    Returns:
+        numpy array representing the distribution over the number of 1s 
+        in the measurement of the state in the z basis
+
+    Note:
+        much faster than using sample_z_basis() to get a distribution over 
+        number of 1s
+    """
+    
+    n = stabilizers.z.shape[0] # number of qubits
+
+    mat = np.zeros((2*n, 2*n), dtype=bool)
+    mat[:n, :n] = stabilizers.z.copy()
+    mat[n:, :n] = stabilizers.x.copy()
+    mat[:n, n:] = destabilizers.z.copy()
+    mat[n:, n:] = destabilizers.x.copy()
+    signs = stabilizers.signs.copy()
+
+    random_list = []
+    for row in range(n, 2*n):
+        for col in range(n):
+            if mat[row, col]:
+                for col1 in range(col + 1, n):
+                    if mat[row, col1]:
+                        comm = 2*np.sum(mat[n:, col1]*mat[:n, col])
+                        signs[col1] = (signs[col1] + signs[col] + comm) % 4
+                        mat[:, col1] ^= mat[:, col]
+                for col1 in range(n, 2*n):
+                    if mat[row, col1]:
+                        mat[:, col1] ^= mat[:, col]
+                mat[:, col + n] = mat[:, col]
+                mat[:, col] =  np.zeros(2*n)
+                mat[row - n, col] = 1
+                signs[col] = 0
+                random_list.append(col + n)
+                break
+
+    assert all(i == 0 or i == 2 for i in signs), 'imaginary signs'
+
+    deterministic_count = np.sum(mat[n:, n:] @ (signs//2))
+
+    num_random = len(random_list)
+    dist = np.zeros(n + 1)
+    if exact:
+        for i in range(2**num_random):
+            digits = np.array(
+                [(i>>k) % 2 for k in range(num_random)], 
+                dtype=int
+            )
+            stochastic_count = np.sum(mat[n:, random_list] @ digits)
+            total_count = deterministic_count + stochastic_count
+            dist[total_count] += 1.0
+        dist = dist/2**num_random
+    else:
+        for _ in range(shots):
+            stochastic_count = np.sum(
+                mat[n:, random_list] @ np.random.randint(2, size=(num_random,))
+            )
+            total_count = deterministic_count + stochastic_count
+            dist[total_count] += 1.0
+        dist = dist/shots
+
+    return dist
+

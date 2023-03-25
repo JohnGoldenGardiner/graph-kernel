@@ -1,9 +1,9 @@
 import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
-from stabilizer_tools import StabilizerTableau
+from stabilizer_tools import StabilizerTableau, count_ones
 
-def dist_from_graph(graph, num_layers=3, shots=100):
+def dist_from_graph(graph, num_layers=3, shots=100, exact=False):
     """
     Generate a probability distribution from a graph. This is done by acting 
     on the state |0>^n with a Clifford circuit based on the graph structure, 
@@ -66,13 +66,93 @@ def dist_from_graph(graph, num_layers=3, shots=100):
             S.conjugate('h', q)
             D.conjugate('h', q)
 
-    results = S.sample_z_basis(destabilizers=D, shots=shots)
+    return count_ones(S, D, shots=shots, exact=exact)
 
-    occupation_numbers = np.zeros(num_qubits + 1)
-    for key, value in results.items():
-        occupation_numbers[key.count('1')] += value
+# def dist_from_graph_test(graph, discrete_parameters, z_basis=True, shots=100, exact=False):
 
-    return occupation_numbers/shots
+#     qubit_mapping = {}
+#     for i, node in enumerate(graph.nodes):
+#         qubit_mapping[node] = i
+
+#     num_qubits = graph.number_of_nodes()
+
+#     S = StabilizerTableau(num_qubits)
+#     D = StabilizerTableau(num_qubits, destabilizers=True)
+
+
+#     num_layers = discrete_parameters.shape[0]
+
+#     for i in range(num_layers):
+#         for node in graph.nodes():
+        
+#             q = qubit_mapping[node]
+#             if discrete_parameters[i, 0] == 0: gate = 's'
+#             else: gate = 'sdg'
+#             S.conjugate('h', q)
+#             D.conjugate('h', q)
+#             S.conjugate(gate, q)
+#             D.conjugate(gate, q)
+#             # assert S.destabilizer_check(D)
+        
+#         for edge in graph.edges():
+            
+#             source = qubit_mapping[edge[0]]
+#             target = qubit_mapping[edge[1]]
+
+#             if discrete_parameters[i, 1] == 0: gate = 's'
+#             else: gate = 'sdg'
+#             S.conjugate('cx', source, target)
+#             D.conjugate('cx', source, target)
+#             # assert S.destabilizer_check(D)
+#             S.conjugate(gate, target)
+#             D.conjugate(gate, target)
+#             # assert S.destabilizer_check(D)
+#             S.conjugate('cx', source, target)
+#             D.conjugate('cx', source, target)
+#             # assert S.destabilizer_check(D)
+
+#             if discrete_parameters[i, 2] == 0: gate = 'id'
+#             else: gate = 'cz'
+#             S.conjugate(gate, source, target)
+#             D.conjugate(gate, source, target)
+#             # assert S.destabilizer_check(D)
+        
+#             if discrete_parameters[i, 3] == 0: gate = 's'
+#             else: gate = 'sdg'
+#             S.conjugate(gate, source)
+#             D.conjugate(gate, source)
+#             # assert S.destabilizer_check(D)
+#             S.conjugate(gate, target)
+#             D.conjugate(gate, target)
+#             # assert S.destabilizer_check(D)
+
+#         # for node in graph.nodes():
+#         #     neighbors = list(graph.neighbors(node))
+#         #     for i in range(1, len(neighbors)):
+#         #         source = qubit_mapping[neighbors[i - 1]]
+#         #         target = qubit_mapping[neighbors[i]]
+#         #         S.conjugate('cx', source, target)
+#         #     q = qubit_mapping[neighbors[-1]]
+#         #     S.conjugate('s', q)
+#         #     for i in range(len(neighbors) - 1, 0, -1):
+#         #         source = qubit_mapping[neighbors[i - 1]]
+#         #         target = qubit_mapping[neighbors[i]]
+#         #         S.conjugate('cx', source, target)
+
+#     if z_basis:
+#         for node in graph.nodes():
+#             q = qubit_mapping[node]
+#             S.conjugate('h', q)
+#             D.conjugate('h', q)
+#     # assert S.destabilizer_check(D)
+
+#     # results = S.sample_z_basis(destabilizers=D, shots=shots)
+
+#     # occupation_numbers = np.zeros(num_qubits + 1)
+#     # for key, value in results.items():
+#     #     occupation_numbers[key.count('1')] += value
+
+#     return count_ones(S, D, shots=shots, exact=exact)
 
 def shannon(dist):
     """
