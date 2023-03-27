@@ -541,7 +541,8 @@ class StabilizerTableau:
         for shot in range(shots):
             
             stabs = self.copy()
-            destabs = destabilizers.copy()
+            if destabilizers is not None:
+                destabs = destabilizers.copy()
             num_qubits = stabs.z.shape[0]
             
             result = ''
@@ -609,7 +610,7 @@ def count_ones(stabilizers, destabilizers, shots=1024, exact=False):
 
     assert all(i == 0 or i == 2 for i in signs), 'imaginary signs'
 
-    deterministic_count = np.sum(mat[n:, n:] @ (signs//2))
+    deterministic_signs = mat[n:, n:] @ (signs//2)
 
     num_random = len(random_list)
     dist = np.zeros(n + 1)
@@ -619,17 +620,16 @@ def count_ones(stabilizers, destabilizers, shots=1024, exact=False):
                 [(i>>k) % 2 for k in range(num_random)], 
                 dtype=int
             )
-            stochastic_count = np.sum(mat[n:, random_list] @ digits)
-            total_count = deterministic_count + stochastic_count
-            dist[total_count] += 1.0
+            stochastic_signs = mat[n:, random_list] @ digits
+            count = np.sum((deterministic_signs + stochastic_signs) % 2)
+            dist[count] += 1
         dist = dist/2**num_random
     else:
         for _ in range(shots):
-            stochastic_count = np.sum(
-                mat[n:, random_list] @ np.random.randint(2, size=(num_random,))
-            )
-            total_count = deterministic_count + stochastic_count
-            dist[total_count] += 1.0
+            stochastic_signs = (mat[n:, random_list] 
+                                @ np.random.randint(2, size=(num_random,)))
+            count = np.sum((deterministic_signs + stochastic_signs) % 2)
+            dist[count] += 1
         dist = dist/shots
 
     return dist
