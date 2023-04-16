@@ -3,7 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from stabilizer_tools import StabilizerTableau, count_ones
 
-def dist_from_graph(graph, num_layers=3, shots=100, exact=False):
+import time
+
+def dist_from_graph(
+    graph, 
+    discrete_parameters=None, 
+    num_layers=3, 
+    shots=100, 
+    exact=False
+):
     """
     Generate a probability distribution from a graph. This is done by acting 
     on the state |0>^n with a Clifford circuit based on the graph structure, 
@@ -13,8 +21,17 @@ def dist_from_graph(graph, num_layers=3, shots=100, exact=False):
 
     Args:
         graph: a networkx graph
-        num_layers: the number of repetitions of the Clifford circuit
+        discrete_parameters: a numpy array of 0s and 1s with 5 columns. 
+            Each row represents a layer in a Clifford circuit. A row's entries 
+            represent whether a certain set of gates is implemented or not 
+            in that layer.
+        num_layers: the number of repetitions of a default Clifford circuit 
+            layer. Each layer corresponds to default discrete parameters 
+            of [1, 1, 1, 0]. Ignored if `discrete_parameters` is given.
         shots: the number of computational basis measurements made.
+        exact: if True, returns the exact distribution. If False, the 
+            distribution is sampled `shots` number of times to give an 
+            approximate distribution.
 
     Returns:
         an numpy array of size (n + 1,) where the i-th entry represents the 
@@ -27,138 +44,84 @@ def dist_from_graph(graph, num_layers=3, shots=100, exact=False):
 
     num_qubits = graph.number_of_nodes()
 
+    if discrete_parameters is not None:
+        num_layers = discrete_parameters.shape[0]
+        if discrete_parameters.shape[1] != 4:
+            raise ValueError('Second dimension of discrete_parameters must '
+                             'have length 4')
+    else:
+        discrete_parameters = np.array([[1, 1, 1, 0]]*num_layers)
+
     S = StabilizerTableau(num_qubits)
     D = StabilizerTableau(num_qubits, destabilizers=True)
 
-    for _ in range(num_layers):
+    for node in graph.nodes():
+        q = qubit_mapping[node]
+        S.conjugate('h', q)
+        D.conjugate('h', q)
+
+    for i in range(num_layers):
+        for node in graph.nodes():
+            if discrete_parameters[i, 0]:
+                q = qubit_mapping[node]
+                S.conjugate('s', q)
+                D.conjugate('s', q)
+        
+        for edge in graph.edges():
+            source = qubit_mapping[edge[0]]
+            target = qubit_mapping[edge[1]]
+
+            # if discrete_parameters[i, 1]:
+            #     S.conjugate('cx', source, target)
+            #     D.conjugate('cx', source, target)
+            #     S.conjugate('s', target)
+            #     D.conjugate('s', target)
+            #     S.conjugate('cx', source, target)
+            #     D.conjugate('cx', source, target)
+
+            if discrete_parameters[i, 1]:
+                S.conjugate('cz', source, target)
+                D.conjugate('cz', source, target)
+        
+            if discrete_parameters[i, 2]:
+                S.conjugate('s', source)
+                D.conjugate('s', source)
+                S.conjugate('s', target)
+                D.conjugate('s', target)
+
+        if discrete_parameters[i, 3]:
+            for node in graph.nodes():
+                neighbors = list(graph.neighbors(node))
+                for i in range(1, len(neighbors)):
+                    source = qubit_mapping[neighbors[i - 1]]
+                    target = qubit_mapping[neighbors[i]]
+                    S.conjugate('cx', source, target)
+                    D.conjugate('cx', source, target)
+                q = qubit_mapping[neighbors[-1]]
+                S.conjugate('s', q)
+                D.conjugate('s', q)
+                for i in range(len(neighbors) - 1, 0, -1):
+                    source = qubit_mapping[neighbors[i - 1]]
+                    target = qubit_mapping[neighbors[i]]
+                    S.conjugate('cx', source, target)
+                    D.conjugate('cx', source, target)
+
         for node in graph.nodes():
             q = qubit_mapping[node]
             S.conjugate('h', q)
             D.conjugate('h', q)
-            S.conjugate('s', q)
-            D.conjugate('s', q)
-        for edge in graph.edges():
-            source = qubit_mapping[edge[0]]
-            target = qubit_mapping[edge[1]]
-            S.conjugate('cx', source, target)
-            D.conjugate('cx', source, target)
-            S.conjugate('sdg', target)
-            D.conjugate('sdg', target)
-            S.conjugate('cx', source, target)
-            D.conjugate('cx', source, target)
-            S.conjugate('cz', source, target)
-            D.conjugate('cz', source, target)
-        # for node in graph.nodes():
-        #     neighbors = list(graph.neighbors(node))
-        #     for i in range(1, len(neighbors)):
-        #         source = qubit_mapping[neighbors[i - 1]]
-        #         target = qubit_mapping[neighbors[i]]
-        #         S.conjugate('cx', source, target)
-        #     q = qubit_mapping[neighbors[-1]]
-        #     S.conjugate('s', q)
-        #     for i in range(len(neighbors) - 1, 0, -1):
-        #         source = qubit_mapping[neighbors[i - 1]]
-        #         target = qubit_mapping[neighbors[i]]
-        #         S.conjugate('cx', source, target)
 
-    for node in graph.nodes():
-            q = qubit_mapping[node]
-            S.conjugate('h', q)
-            D.conjugate('h', q)
+    dist = count_ones(S, D, shots=shots, exact=exact)
 
-    return count_ones(S, D, shots=shots, exact=exact)
-
-# def dist_from_graph_test(graph, discrete_parameters, z_basis=True, shots=100, exact=False):
-
-#     qubit_mapping = {}
-#     for i, node in enumerate(graph.nodes):
-#         qubit_mapping[node] = i
-
-#     num_qubits = graph.number_of_nodes()
-
-#     S = StabilizerTableau(num_qubits)
-#     D = StabilizerTableau(num_qubits, destabilizers=True)
-
-
-#     num_layers = discrete_parameters.shape[0]
-
-#     for i in range(num_layers):
-#         for node in graph.nodes():
-        
-#             q = qubit_mapping[node]
-#             if discrete_parameters[i, 0] == 0: gate = 's'
-#             else: gate = 'sdg'
-#             S.conjugate('h', q)
-#             D.conjugate('h', q)
-#             S.conjugate(gate, q)
-#             D.conjugate(gate, q)
-#             # assert S.destabilizer_check(D)
-        
-#         for edge in graph.edges():
-            
-#             source = qubit_mapping[edge[0]]
-#             target = qubit_mapping[edge[1]]
-
-#             if discrete_parameters[i, 1] == 0: gate = 's'
-#             else: gate = 'sdg'
-#             S.conjugate('cx', source, target)
-#             D.conjugate('cx', source, target)
-#             # assert S.destabilizer_check(D)
-#             S.conjugate(gate, target)
-#             D.conjugate(gate, target)
-#             # assert S.destabilizer_check(D)
-#             S.conjugate('cx', source, target)
-#             D.conjugate('cx', source, target)
-#             # assert S.destabilizer_check(D)
-
-#             if discrete_parameters[i, 2] == 0: gate = 'id'
-#             else: gate = 'cz'
-#             S.conjugate(gate, source, target)
-#             D.conjugate(gate, source, target)
-#             # assert S.destabilizer_check(D)
-        
-#             if discrete_parameters[i, 3] == 0: gate = 's'
-#             else: gate = 'sdg'
-#             S.conjugate(gate, source)
-#             D.conjugate(gate, source)
-#             # assert S.destabilizer_check(D)
-#             S.conjugate(gate, target)
-#             D.conjugate(gate, target)
-#             # assert S.destabilizer_check(D)
-
-#         # for node in graph.nodes():
-#         #     neighbors = list(graph.neighbors(node))
-#         #     for i in range(1, len(neighbors)):
-#         #         source = qubit_mapping[neighbors[i - 1]]
-#         #         target = qubit_mapping[neighbors[i]]
-#         #         S.conjugate('cx', source, target)
-#         #     q = qubit_mapping[neighbors[-1]]
-#         #     S.conjugate('s', q)
-#         #     for i in range(len(neighbors) - 1, 0, -1):
-#         #         source = qubit_mapping[neighbors[i - 1]]
-#         #         target = qubit_mapping[neighbors[i]]
-#         #         S.conjugate('cx', source, target)
-
-#     if z_basis:
-#         for node in graph.nodes():
-#             q = qubit_mapping[node]
-#             S.conjugate('h', q)
-#             D.conjugate('h', q)
-#     # assert S.destabilizer_check(D)
-
-#     # results = S.sample_z_basis(destabilizers=D, shots=shots)
-
-#     # occupation_numbers = np.zeros(num_qubits + 1)
-#     # for key, value in results.items():
-#     #     occupation_numbers[key.count('1')] += value
-
-#     return count_ones(S, D, shots=shots, exact=exact)
+    return dist
 
 def shannon(dist):
     """
     Return the Shannon entropy of a distribution
     """
-    return -np.sum(dist*np.log(dist, where=(dist!=0)))
+    return -np.sum(dist*np.log(dist, 
+                               where=(dist>0), 
+                               out=np.zeros_like(dist)), axis=-1)
 
 def jensen_shannon(dist1, dist2):
     """
@@ -169,22 +132,38 @@ def jensen_shannon(dist1, dist2):
     dist2 = np.pad(dist2, ((0, length - len(dist2))))
     return shannon((dist1 + dist2)/2) - (shannon(dist1) + shannon(dist2))/2
 
-def kernel_entry(dist1, dist2, coeff=40):
-    """
-    A kernel function between distributions
-    """
-    return np.exp(-coeff*jensen_shannon(dist1, dist2))
+# def kernel_entry(dist1, dist2, coeff=40):
+#     """
+#     A kernel function between distributions
+#     """
+#     return np.exp(-coeff*jensen_shannon(dist1, dist2))
 
-def kernel_function(X1, X2, coeff=40):
+# def kernel_function(X1, X2, coeff=40):
+#     """
+#     Calculate the kernel between distributions in X1 and X2
+
+#     Returns:
+#         a numpy array of size (X1.shape[0], X2.shape[0])
+#     """
+#     kernel = np.zeros((X1.shape[0], X2.shape[0]))
+#     for i, j in np.ndindex(kernel.shape):
+#         kernel[i, j] = kernel_entry(X1[i], X2[j], coeff=coeff)
+#     return kernel
+
+def kernel_function(X1, X2, gamma=40):
     """
     Calculate the kernel between distributions in X1 and X2
 
     Returns:
         a numpy array of size (X1.shape[0], X2.shape[0])
     """
-    kernel = np.zeros((X1.shape[0], X2.shape[0]))
-    for i, j in np.ndindex(kernel.shape):
-        kernel[i, j] = kernel_entry(X1[i], X2[j], coeff=coeff)
+    distsums = np.zeros((X1.shape[0], X2.shape[0], X1.shape[1]))
+    for i in range(X2.shape[0]):
+        distsums[:, i, :] = (X1 + X2[i])/2
+    kernel = np.exp(-gamma*(
+        shannon(distsums) 
+        - np.add.outer(shannon(X1), shannon(X2))/2
+    ))
     return kernel
 
 def triangular_random_walk(num_nodes, p_acceptance, sublattice=None):
